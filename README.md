@@ -57,7 +57,7 @@ Key property: **the inverted pattern is never stored** — it's derived from `pa
 
 ### Playback engine
 
-`playPattern` resets `Tone.Transport` (cancel + position 0), schedules one callback per sixteenth-note step at `index * (60 / bpm / 4)` seconds, and a final callback that stops the transport at the end of the bar. Notes trigger on the audio-clock `time` argument for sample-accurate timing; the step highlight uses React state (visually ~50–100 ms lookahead offset, imperceptible at these tempos). One pattern plays at a time; the play button of the playing pattern becomes a stop button.
+`playPattern` resets `Tone.Transport` (cancel + position 0), then schedules one callback per step in **musical time** (`0:0:N` bars:beats:sixteenths notation) rather than seconds — this is what lets the BPM slider retime a pattern *while it plays*. Notes trigger on the audio-clock `time` argument for sample-accurate timing; the step highlight uses React state (visually ~50–100 ms lookahead offset, imperceptible at these tempos). Looping uses `Transport.loop` over `[0, '1:0:0')`; the end-of-bar stop callback checks a ref so the loop toggle works live mid-playback (toggling off finishes the current bar cleanly). One pattern plays at a time; the play button of the playing pattern becomes a stop button. Playback pitch follows the same note selector used for MIDI export, so what you hear is what you export.
 
 ### MIDI format details
 
@@ -74,10 +74,10 @@ Key property: **the inverted pattern is never stored** — it's derived from `pa
 These are the places where the spec was ambiguous or I deviated deliberately — flagged per the handoff instructions:
 
 1. **Custom MIDI writer instead of `jsmidgen`.** The spec said "`jsmidgen` or equivalent." jsmidgen (last published ~2015, CommonJS) does not resolve under Vite's ESM bundler — the build failed. Rather than pull in a heavier dependency, I wrote a ~90-line SMF writer. It's covered by a byte-level parser test (see Verification below). If it becomes limiting, swap for `@tonejs/midi` (see `NEXT_STEPS.md`).
-2. **Exported note is C4 (MIDI 60), velocity 100, channel 1.** The spec says rhythm-only, one note value, but doesn't say *which* note. C4 is neutral and easy to transpose in a DAW. If the primary workflow is dropping onto an Ableton Drum Rack, C1 (MIDI 36, kick) may be more convenient — one-line change in `midiGenerator.js` defaults.
+2. **Exported note is user-selectable** (dropdown: GM drum-map notes — kick 36, snare 38, hats 42/46 — plus C3/C4/C5), defaulting to C4 (MIDI 60); velocity 100, channel 1. Playback uses the same pitch. The spec says rhythm-only with one note value but doesn't say which; the selector removes the guess.
 3. **Inverted grid is read-only.** The spec implies the original is the editable source ("inverted pattern renders live below"). Making both editable would create a two-way sync question the spec doesn't answer.
-4. **Playback is single-pass, not looped.** The spec doesn't mention looping. A loop toggle is an easy v1.1 item (see roadmap).
-5. **BPM changes don't retime a pattern mid-playback** — steps are scheduled in seconds at play start. Restart playback to hear a new tempo. Fixing this means scheduling in transport-relative time (`"0:0:1"` notation) instead of seconds; noted as tech debt.
+4. **Playback supports single-pass and loop** via a loop toggle (live, mid-playback). The spec didn't mention looping; it was added as v1.1 polish because groove auditioning is loop-shaped.
+5. **BPM is live during playback** — steps are scheduled in musical time, so the transport retimes on slider change. Remaining limitation: *cell edits* mid-playback don't reschedule a running pattern; restart playback to hear pattern changes. (Fix would be migrating to `Tone.Sequence` with a live pattern reference — roadmap material, not MVP.)
 6. **`base: './'` in `vite.config.js` is load-bearing.** GitHub Pages serves this app from `/LW_MIDI_App/`, not the domain root. Without a relative base, the built HTML requests `/assets/…` and the page renders empty (this bug shipped once — don't reintroduce it).
 7. **All CSS lives in `index.html`.** Fine at this size; move to CSS modules if the component count grows.
 

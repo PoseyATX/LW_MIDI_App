@@ -10,6 +10,7 @@ The byte-level structure is machine-verified (see README → Verification), but 
 - [ ] Confirm the clip length is exactly **1 bar** and loops cleanly with no trailing silence or truncation.
 - [ ] Confirm the DAW reads the **embedded tempo** (import at a project tempo different from the export BPM and check which wins — DAWs differ; know your DAW's behavior).
 - [ ] Confirm hits land on the grid lines in the DAW's piano roll (no off-grid drift), and note length is one sixteenth.
+- [ ] Change the note selector (e.g. C1 · 36 — Kick) before exporting and confirm the hits land on that key — especially onto an Ableton Drum Rack pad.
 - [ ] Export at extreme BPMs (40 and 240) and confirm both import sanely.
 - [ ] Edge cases: empty pattern (should import as one empty bar) and all-16-hits.
 - [ ] A/B test: play the pattern in-browser, then in the DAW at the same BPM — they should be rhythmically identical.

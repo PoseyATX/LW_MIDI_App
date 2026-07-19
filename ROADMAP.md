@@ -8,16 +8,17 @@ Sequencing principle: ship the things that deepen the core loop (build → hear 
 
 Small items with outsized daily-use value; all are afternoon-sized.
 
-1. **Loop playback toggle.** Musicians audition grooves in loops, not single passes. Highest value-to-effort ratio in the backlog. (Tone.js `Transport.loop` makes this trivial.)
-2. **Live BPM during playback.** Schedule steps in transport-relative time (`bars:beats:sixteenths`) instead of seconds, so the BPM slider retimes a playing pattern. Pays down the known tech debt in `playPattern`.
+1. ~~**Loop playback toggle.**~~ ✅ **Shipped.** Live toggle, works mid-playback via `Transport.loop`.
+2. ~~**Live BPM during playback.**~~ ✅ **Shipped.** Steps now scheduled in `bars:beats:sixteenths`; the slider retimes a playing pattern.
 3. **Pattern presets + URL sharing.** Encode the 16 cells as 4 hex chars in the URL hash (e.g. `#8888` = four-on-the-floor). Makes patterns shareable with the roommate — the actual target user — for free, no backend.
 4. **Beat grouping visuals.** Heavier border every 4 cells so beats 1/2/3/4 are readable at a glance.
+5. **Live cell edits during playback.** Editing a cell mid-play currently requires a restart to hear the change; migrating scheduling to `Tone.Sequence` with a live pattern reference fixes it.
 
 ## Phase 2 — Wider patterns (v1.2)
 
-5. **Adjustable grid resolution (8/16/32).** First open question in the spec. The state model already supports any length; work is UI + one constant → parameter in the MIDI writer and scheduler. Do this *before* MIDI import so imports have somewhere to land besides 16 slots.
-6. **Choice of exported note/channel** (C4 vs. C1-for-drum-racks vs. GM channel 10). One dropdown; removes the most likely DAW-workflow friction.
-7. **Velocity per cell** (off / soft / accent). Stays within "rhythm only" but makes exports musical. This is the natural point to migrate the cell state from `boolean[]` to `int[]` — do it here, before multi-voice multiplies the cost of the migration.
+6. **Adjustable grid resolution (8/16/32).** First open question in the spec. The state model already supports any length; work is UI + one constant → parameter in the MIDI writer and scheduler. Do this *before* MIDI import so imports have somewhere to land besides 16 slots.
+7. ~~**Choice of exported note.**~~ ✅ **Shipped early** (pulled forward from this phase): dropdown with GM drum-map notes + C3/C4/C5, applied to both playback and export. Channel selection (e.g. GM ch. 10) remains open if a DAW workflow demands it.
+8. **Velocity per cell** (off / soft / accent). Stays within "rhythm only" but makes exports musical. This is the natural point to migrate the cell state from `boolean[]` to `int[]` — do it here, before multi-voice multiplies the cost of the migration.
 
 ## Phase 3 — MIDI import (v2)
 
@@ -29,7 +30,7 @@ Small items with outsized daily-use value; all are afternoon-sized.
 
 ## Tech debt / shortcuts to revisit
 
-- **Seconds-based scheduling** — fixed by Phase 1 item 2.
+- ~~**Seconds-based scheduling**~~ — resolved; playback now schedules in musical time.
 - **Custom MIDI writer** — correct and parser-tested for what it does, but it's bespoke code; when `@tonejs/midi` arrives for import (Phase 3), consider using it for export too and deleting `midiGenerator.js`.
 - **No test runner in the repo.** Verification currently lives in a standalone Node script exercising the pure utils. Add Vitest and land those tests as `src/utils/*.test.js` the next time anyone touches the utils.
 - **All CSS in `index.html`** — fine now; split into modules when multi-voice UI lands.

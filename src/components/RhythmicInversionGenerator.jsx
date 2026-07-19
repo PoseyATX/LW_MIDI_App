@@ -1,17 +1,31 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import * as Tone from 'tone';
 import { invertPattern, patternToString } from '../utils/inversion';
 import { exportMidiFile } from '../utils/midiGenerator';
 
 const GRID_SIZE = 16;
 
+// Common targets: General MIDI drum-map notes for DAW drum racks, plus plain C's.
+const NOTE_OPTIONS = [
+  { midi: 36, label: 'C1 · 36 — Kick (GM drums)' },
+  { midi: 38, label: 'D1 · 38 — Snare (GM drums)' },
+  { midi: 42, label: 'F#1 · 42 — Closed Hat (GM drums)' },
+  { midi: 46, label: 'A#1 · 46 — Open Hat (GM drums)' },
+  { midi: 48, label: 'C3 · 48' },
+  { midi: 60, label: 'C4 · 60 — Middle C' },
+  { midi: 72, label: 'C5 · 72' },
+];
+
 export default function RhythmicInversionGenerator() {
   const [pattern, setPattern] = useState(() => Array(GRID_SIZE).fill(false));
   const [bpm, setBpm] = useState(120);
+  const [exportNote, setExportNote] = useState(60);
+  const [loopEnabled, setLoopEnabled] = useState(false);
   // Which pattern is audible right now: 'original', 'inverted', or null.
   const [playingVoice, setPlayingVoice] = useState(null);
   const [currentStep, setCurrentStep] = useState(-1);
   const synth = useRef(null);
+  const loopRef = useRef(loopEnabled);
 
   useEffect(() => {
     // Creating a synth doesn't need a running AudioContext; Tone.start()
@@ -23,9 +37,23 @@ export default function RhythmicInversionGenerator() {
     return () => {
       Tone.Transport.stop();
       Tone.Transport.cancel();
+      Tone.Transport.loop = false;
       synth.current?.dispose();
     };
   }, []);
+
+  // Steps are scheduled in musical time (bars:beats:sixteenths), so updating
+  // the transport BPM retimes a playing pattern live.
+  useEffect(() => {
+    Tone.Transport.bpm.value = bpm;
+  }, [bpm]);
+
+  // Loop can be toggled mid-playback; the end-of-bar callback consults
+  // loopRef so a live toggle-off still stops cleanly at the bar line.
+  useEffect(() => {
+    loopRef.current = loopEnabled;
+    Tone.Transport.loop = loopEnabled;
+  }, [loopEnabled]);
 
   const inverted = invertPattern(pattern);
 
@@ -36,6 +64,7 @@ export default function RhythmicInversionGenerator() {
   const stopPlayback = () => {
     Tone.Transport.stop();
     Tone.Transport.cancel();
+    Tone.Transport.loop = false;
     setPlayingVoice(null);
     setCurrentStep(-1);
   };
@@ -57,24 +86,31 @@ export default function RhythmicInversionGenerator() {
     // without this, a second play would schedule events in the past.
     Tone.Transport.cancel();
     Tone.Transport.position = 0;
+    Tone.Transport.bpm.value = bpm;
+    Tone.Transport.loop = loopEnabled;
+    Tone.Transport.loopStart = 0;
+    Tone.Transport.loopEnd = '1:0:0';
 
-    const stepDuration = 60 / bpm / 4; // one sixteenth note, in seconds
+    const pitch = Tone.Frequency(exportNote, 'midi').toNote();
 
     patternToPlay.forEach((isActive, index) => {
       Tone.Transport.schedule((time) => {
         setCurrentStep(index);
         if (isActive) {
-          synth.current?.triggerAttackRelease('C4', '16n', time);
+          synth.current?.triggerAttackRelease(pitch, '16n', time);
         }
-      }, index * stepDuration);
+      }, `0:0:${index}`);
     });
 
+    // When looping, the transport wraps just before '1:0:0' and this never
+    // fires; when the loop is off (or toggled off mid-play), it stops here.
     Tone.Transport.schedule(() => {
+      if (loopRef.current) return;
       Tone.Transport.stop();
       Tone.Transport.cancel();
       setPlayingVoice(null);
       setCurrentStep(-1);
-    }, GRID_SIZE * stepDuration);
+    }, '1:0:0');
 
     setPlayingVoice(voice);
     Tone.Transport.start();
@@ -117,6 +153,20 @@ export default function RhythmicInversionGenerator() {
           <div className="bpm-value">{bpm}</div>
         </div>
 
+        <div className="control-group">
+          <label>Note (playback &amp; MIDI export)</label>
+          <select
+            value={exportNote}
+            onChange={(e) => setExportNote(parseInt(e.target.value, 10))}
+          >
+            {NOTE_OPTIONS.map((opt) => (
+              <option key={opt.midi} value={opt.midi}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="control-group button-group">
           <button className="btn-primary" onClick={() => playPattern(pattern, 'original')}>
             {playLabel('original', 'Play Original')}
@@ -127,6 +177,12 @@ export default function RhythmicInversionGenerator() {
         </div>
 
         <div className="control-group button-group">
+          <button
+            className={loopEnabled ? 'btn-primary' : 'btn-secondary'}
+            onClick={() => setLoopEnabled((v) => !v)}
+          >
+            {loopEnabled ? '🔁 Loop: On' : '🔁 Loop: Off'}
+          </button>
           <button className="btn-danger" onClick={clearPattern}>
             🗑 Clear
           </button>
@@ -135,7 +191,7 @@ export default function RhythmicInversionGenerator() {
 
       {playingVoice && (
         <div className="status playing">
-          ▶ Playing {playingVoice} pattern…
+          ▶ Playing {playingVoice} pattern{loopEnabled ? ' (looping)' : ''}…
         </div>
       )}
 
@@ -156,7 +212,7 @@ export default function RhythmicInversionGenerator() {
             </button>
             <button
               className="btn-success"
-              onClick={() => exportMidiFile(pattern, bpm, 'original-pattern')}
+              onClick={() => exportMidiFile(pattern, bpm, 'original-pattern', { note: exportNote })}
             >
               💾 Export MIDI
             </button>
@@ -179,7 +235,7 @@ export default function RhythmicInversionGenerator() {
             </button>
             <button
               className="btn-success"
-              onClick={() => exportMidiFile(inverted, bpm, 'inverted-pattern')}
+              onClick={() => exportMidiFile(inverted, bpm, 'inverted-pattern', { note: exportNote })}
             >
               💾 Export MIDI
             </button>
@@ -192,8 +248,11 @@ export default function RhythmicInversionGenerator() {
         <button
           className="btn-success"
           onClick={() => {
-            exportMidiFile(pattern, bpm, 'original-pattern');
-            setTimeout(() => exportMidiFile(inverted, bpm, 'inverted-pattern'), 500);
+            exportMidiFile(pattern, bpm, 'original-pattern', { note: exportNote });
+            setTimeout(
+              () => exportMidiFile(inverted, bpm, 'inverted-pattern', { note: exportNote }),
+              500
+            );
           }}
         >
           💾 Export All
