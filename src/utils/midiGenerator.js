@@ -1,84 +1,75 @@
-// Minimal MIDI file generator for simple drum patterns
-// Creates a valid MIDI file with note-on/note-off events
+// Minimal Standard MIDI File (format 0) writer for one-bar step patterns.
+// buildMidiBytes is pure (no DOM) so it can be unit-tested from Node;
+// exportMidiFile wraps it with a browser download.
 
-export function generateMidiFile(pattern, bpm, filename) {
-  const noteValue = 60; // Middle C
-  const velocity = 100;
+const PPQ = 480; // ticks per quarter note
+const STEP_TICKS = PPQ / 4; // one sixteenth note
 
-  // MIDI file structure
-  const header = [
-    // MThd header
-    0x4d, 0x54, 0x68, 0x64, // 'MThd'
-    0x00, 0x00, 0x00, 0x06, // Header length (6 bytes)
-    0x00, 0x00, // Format type 0
-    0x00, 0x01, // Number of tracks
-    0x00, 0xf0, // Division (240 ticks per quarter note)
-  ];
+// MIDI delta times are variable-length quantities: 7 bits per byte,
+// high bit set on every byte except the last.
+function vlq(value) {
+  const bytes = [value & 0x7f];
+  value >>= 7;
+  while (value > 0) {
+    bytes.unshift((value & 0x7f) | 0x80);
+    value >>= 7;
+  }
+  return bytes;
+}
 
-  // Build track data
-  let trackData = [];
-
-  // Set tempo: 3 bytes for tempo in microseconds per quarter note
-  const microsecondsPerQuarter = Math.round(60000000 / bpm);
-  trackData = trackData.concat([
-    0x00, // Delta time
-    0xff, 0x51, 0x03, // Meta event: Set Tempo
-    (microsecondsPerQuarter >> 16) & 0xff,
-    (microsecondsPerQuarter >> 8) & 0xff,
-    microsecondsPerQuarter & 0xff,
-  ]);
-
-  // Add notes for each step
-  // Each sixteenth note = 60 ticks (240 / 4)
-  const sixteenthTicks = 60;
-
-  pattern.forEach((isActive, index) => {
-    // Delta time from previous event (240 ticks = 60 per sixteenth = one sixteenth note)
-    if (index === 0) {
-      trackData.push(0x00); // No delay for first note
-    } else {
-      trackData.push(sixteenthTicks & 0x7f);
-    }
-
-    if (isActive) {
-      // Note On event
-      trackData = trackData.concat([0x90, noteValue, velocity]);
-
-      // Delta time for note duration
-      trackData.push(sixteenthTicks & 0x7f);
-
-      // Note Off event
-      trackData = trackData.concat([0x80, noteValue, velocity]);
+export function buildMidiBytes(pattern, bpm, { note = 60, velocity = 100 } = {}) {
+  // Absolute-tick event list first; deltas are computed in a second pass so
+  // rests never emit bytes and gaps of any length encode correctly.
+  const events = [];
+  pattern.forEach((isHit, i) => {
+    if (isHit) {
+      events.push({ tick: i * STEP_TICKS, data: [0x90, note, velocity] });
+      events.push({ tick: (i + 1) * STEP_TICKS, data: [0x80, note, 0] });
     }
   });
+  // Stable sort keeps each note-off ahead of the next note-on at the same tick.
+  events.sort((a, b) => a.tick - b.tick);
 
-  // Add track end meta event
-  trackData = trackData.concat([0x00, 0xff, 0x2f, 0x00]);
+  const track = [];
+  const microsecondsPerQuarter = Math.round(60_000_000 / bpm);
+  track.push(
+    0x00, 0xff, 0x51, 0x03, // delta 0, Set Tempo meta event
+    (microsecondsPerQuarter >> 16) & 0xff,
+    (microsecondsPerQuarter >> 8) & 0xff,
+    microsecondsPerQuarter & 0xff
+  );
 
-  // Build MTrk header
-  const trackHeader = [0x4d, 0x54, 0x72, 0x6b]; // 'MTrk'
+  let lastTick = 0;
+  for (const ev of events) {
+    track.push(...vlq(ev.tick - lastTick), ...ev.data);
+    lastTick = ev.tick;
+  }
 
-  // Convert trackData to Uint8Array for length calculation
-  const trackDataBytes = new Uint8Array(trackData);
-  const trackLength = trackDataBytes.length;
+  // End of Track, padded out to the full bar so the exported clip is one measure.
+  const endTick = pattern.length * STEP_TICKS;
+  track.push(...vlq(Math.max(0, endTick - lastTick)), 0xff, 0x2f, 0x00);
 
-  const trackLengthBytes = [
-    (trackLength >> 24) & 0xff,
-    (trackLength >> 16) & 0xff,
-    (trackLength >> 8) & 0xff,
-    trackLength & 0xff,
+  const header = [
+    0x4d, 0x54, 0x68, 0x64, // 'MThd'
+    0x00, 0x00, 0x00, 0x06, // header length
+    0x00, 0x00, // format 0
+    0x00, 0x01, // one track
+    (PPQ >> 8) & 0xff, PPQ & 0xff,
+  ];
+  const trackHeader = [
+    0x4d, 0x54, 0x72, 0x6b, // 'MTrk'
+    (track.length >>> 24) & 0xff,
+    (track.length >> 16) & 0xff,
+    (track.length >> 8) & 0xff,
+    track.length & 0xff,
   ];
 
-  // Combine all parts
-  const midiFile = new Uint8Array([
-    ...header,
-    ...trackHeader,
-    ...trackLengthBytes,
-    ...trackData,
-  ]);
+  return new Uint8Array([...header, ...trackHeader, ...track]);
+}
 
-  // Create download link
-  const blob = new Blob([midiFile], { type: 'audio/midi' });
+export function exportMidiFile(pattern, bpm, filename, options) {
+  const bytes = buildMidiBytes(pattern, bpm, options);
+  const blob = new Blob([bytes], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
